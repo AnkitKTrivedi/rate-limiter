@@ -2,6 +2,8 @@ import { Request, Response, NextFunction } from "express";
 
 import { RateLimitService } from "../core/RateLimitService";
 
+import { setRateLimitHeaders } from "../http/RateLimitHeaders";
+
 export interface RateLimiterMiddlewareOptions {
   service: RateLimitService;
 }
@@ -31,35 +33,24 @@ export function rateLimiterMiddleware(options: RateLimiterMiddlewareOptions) {
 
       const result = await service.check(context);
 
-      // No policy = no rate limiting
+      // No applicable policy.
       if (!result) {
         return next();
       }
 
-      res.setHeader("RateLimit-Limit", result.limit);
-
-      res.setHeader("RateLimit-Remaining", result.remaining);
-
-      res.setHeader(
-        "RateLimit-Reset",
-        Math.ceil((result.resetAt - Date.now()) / 1000),
-      );
+      setRateLimitHeaders(res, result);
 
       if (!result.allowed) {
-        res.setHeader("Retry-After", result.retryAfter);
-
         return res.status(429).json({
           error: "Too Many Requests",
-
           message: "Rate limit exceeded",
-
           retryAfter: result.retryAfter,
         });
       }
 
-      next();
+      return next();
     } catch (error) {
-      next(error);
+      return next(error);
     }
   };
 }
