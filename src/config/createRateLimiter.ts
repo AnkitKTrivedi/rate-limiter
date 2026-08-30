@@ -20,6 +20,7 @@ import { RateLimitPolicy } from "../core/RateLimitPolicy";
 
 import { redisClient } from "./redis";
 import { FailOpenStrategy } from "../core/failure/FailOpenStrategy";
+import { ConsoleRateLimitMetrics } from "../observability/ConsoleRateLimitMetrics";
 
 export function createRateLimitService(
   policies: RateLimitPolicy[],
@@ -43,6 +44,8 @@ export function createRateLimitService(
   const registry = new AlgorithmRegistry();
 
   const failureStrategy = new FailOpenStrategy();
+
+  const metrics = new ConsoleRateLimitMetrics();
 
   registry.register("fixed-window", (policy) => {
     if (policy.algorithm !== "fixed-window") {
@@ -94,5 +97,5 @@ export function createRateLimitService(
 
   const policyEngine = new PolicyEngine(resolver, keyGenerator);
 
-  return new RateLimitService(policyEngine, registry, failureStrategy);
+  return new RateLimitService(policyEngine, registry, failureStrategy, metrics);
 }

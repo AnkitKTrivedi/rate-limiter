@@ -14,10 +14,16 @@ describe("RateLimitService", () => {
       create: jest.fn(),
     };
 
+    const metrics = {
+      recordAllowed: jest.fn(),
+      recordRejected: jest.fn(),
+      recordError: jest.fn(),
+    };
     const service = new RateLimitService(
       policyEngine as any,
       algorithmRegistry as any,
       failureStrategy as any,
+      metrics as any,
     );
 
     return {

@@ -6,12 +6,14 @@ import { RateLimitContext } from "./PolicyResolver";
 
 import { RateLimitResult } from "./RateLimitResult";
 import { RateLimitFailureStrategy } from "./RateLimitFailureStrategy";
+import { RateLimitMetrics } from "../observability/RateLimitMetrics";
 
 export class RateLimitService {
   constructor(
     private readonly policyEngine: PolicyEngine,
     private readonly algorithmRegistry: AlgorithmRegistry,
     private readonly failureStrategy: RateLimitFailureStrategy,
+    private readonly metrics: RateLimitMetrics,
   ) {}
 
   async check(context: RateLimitContext): Promise<RateLimitResult | null> {
@@ -24,9 +26,37 @@ export class RateLimitService {
 
       const results = await Promise.all(
         resolvedPolicies.map(async ({ policy, key }) => {
-          const algorithm = this.algorithmRegistry.create(policy);
+          const start = Date.now();
 
-          return algorithm.consume(key);
+          try {
+            const algorithm = this.algorithmRegistry.create(policy);
+
+            const result = await algorithm.consume(key);
+
+            const durationMs = Date.now() - start;
+
+            if (result.allowed) {
+              this.metrics.recordAllowed(
+                policy.name,
+                policy.algorithm,
+                durationMs,
+              );
+            } else {
+              this.metrics.recordRejected(
+                policy.name,
+                policy.algorithm,
+                durationMs,
+              );
+            }
+
+            return result;
+          } catch (error) {
+            const durationMs = Date.now() - start;
+
+            this.metrics.recordError(policy.name, policy.algorithm, durationMs);
+
+            throw error;
+          }
         }),
       );
 
