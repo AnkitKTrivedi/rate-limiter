@@ -11,7 +11,10 @@ export interface SlidingWindowStoreResult {
 }
 
 export class RedisSlidingWindowStore {
-  constructor(private readonly redis: RedisClientType) {}
+  constructor(
+    private readonly redis: RedisClientType,
+    private readonly executor: RedisOperationExecutor,
+  ) {}
 
   async consume(
     key: string,
@@ -24,22 +27,34 @@ export class RedisSlidingWindowStore {
 
     const expirySeconds = Math.ceil(windowMs / 1000) + 1;
 
-    const result = (await this.redis.eval(slidingWindowScript, {
-      keys: [key],
-      arguments: [
-        now.toString(),
-        windowMs.toString(),
-        limit.toString(),
-        requestId,
-        expirySeconds.toString(),
-      ],
-    })) as number[];
+    const result = await this.executor.execute(() =>
+      this.redis.eval(slidingWindowScript, {
+        keys: [key],
+        arguments: [
+          now.toString(),
+          windowMs.toString(),
+          limit.toString(),
+          requestId,
+          expirySeconds.toString(),
+        ],
+      }),
+    );
+
+    if (result === null) {
+      throw new Error("Redis sliding-window script returned null");
+    }
+
+    if (!Array.isArray(result) || result.length < 3) {
+      throw new Error("Invalid response from Redis sliding-window script");
+    }
+
+    const [allowed, resultLimit, remaining, retryAfter] = result;
 
     return {
-      allowed: result[0] === 1,
-      limit: result[1],
-      remaining: result[2],
-      retryAfter: result[3],
+      allowed: Number(allowed) === 1,
+      limit: Number(resultLimit),
+      remaining: Number(remaining),
+      retryAfter: Number(retryAfter),
     };
   }
 }

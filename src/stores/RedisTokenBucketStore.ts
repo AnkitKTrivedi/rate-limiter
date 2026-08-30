@@ -1,6 +1,7 @@
 import { RedisClientType } from "redis";
 
 import { TokenBucketStore } from "../core/TokenBucketStore";
+import { RedisOperationExecutor } from "../infrastructure/RedisOperationExecutor";
 
 const TOKEN_BUCKET_SCRIPT = `
 local key = KEYS[1]
@@ -96,7 +97,10 @@ return {
 `;
 
 export class RedisTokenBucketStore implements TokenBucketStore {
-  constructor(private readonly redisClient: RedisClientType) {}
+  constructor(
+    private readonly redisClient: RedisClientType,
+    private readonly executor: RedisOperationExecutor,
+  ) {}
 
   async consume(
     key: string,
@@ -107,16 +111,12 @@ export class RedisTokenBucketStore implements TokenBucketStore {
   ) {
     const ttl = Math.ceil((capacity / refillRate) * 1000);
 
-    const result = await this.redisClient.eval(TOKEN_BUCKET_SCRIPT, {
-      keys: [key],
-      arguments: [
-        now.toString(),
-        capacity.toString(),
-        refillRate.toString(),
-        requestedTokens.toString(),
-        ttl.toString(),
-      ],
-    });
+    const result = await this.executor.execute(() =>
+      this.redisClient.eval(TOKEN_BUCKET_SCRIPT, {
+        keys: [key],
+        arguments: [now.toString(), capacity.toString(), refillRate.toString()],
+      }),
+    );
 
     if (!Array.isArray(result) || result.length !== 3) {
       throw new Error("Invalid Redis token bucket response");

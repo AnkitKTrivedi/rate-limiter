@@ -4,7 +4,7 @@ local key = KEYS[1]
 local now = tonumber(ARGV[1])
 local windowMs = tonumber(ARGV[2])
 local limit = tonumber(ARGV[3])
-local requestId = ARGV[4])
+local requestId = ARGV[4]
 local expirySeconds = tonumber(ARGV[5])
 
 local windowStart = now - windowMs

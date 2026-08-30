@@ -21,6 +21,7 @@ import { RateLimitPolicy } from "../core/RateLimitPolicy";
 import { redisClient } from "./redis";
 import { FailOpenStrategy } from "../core/failure/FailOpenStrategy";
 import { ConsoleRateLimitMetrics } from "../observability/ConsoleRateLimitMetrics";
+import { RedisOperationExecutor } from "../infrastructure/RedisOperationExecutor";
 
 export function createRateLimitService(
   policies: RateLimitPolicy[],
@@ -34,12 +35,15 @@ export function createRateLimitService(
    */
 
   const fixedWindowStore = new RedisFixedWindowStore(redis);
+  const redisExecutor = new RedisOperationExecutor(
+    Number(process.env.REDIS_OPERATION_TIMEOUT_MS ?? 300),
+  );
 
-  const slidingWindowStore = new RedisSlidingWindowStore(redis);
+  const slidingWindowStore = new RedisSlidingWindowStore(redis, redisExecutor);
 
-  const tokenBucketStore = new RedisTokenBucketStore(redis);
+  const tokenBucketStore = new RedisTokenBucketStore(redis, redisExecutor);
 
-  const leakyBucketStore = new RedisLeakyBucketStore(redis);
+  const leakyBucketStore = new RedisLeakyBucketStore(redis, redisExecutor);
 
   const registry = new AlgorithmRegistry();
 

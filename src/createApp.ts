@@ -1,38 +1,52 @@
-import { request } from "express";
-import { RateLimitPolicy } from "./core/RateLimitPolicy";
+import express from "express";
 
-const testPolicies: RateLimitPolicy[] = [
-  {
-    name: "users-read",
-    route: "/api/users",
-    method: "GET",
-    algorithm: "sliding-window",
-    limit: 3,
-    windowMs: 60_000,
-  },
-];
+import { rateLimiterMiddleware } from "./middleware/rateLimiter";
 
-it("should return 429 after limit", async () => {
-  const apiKey = "429-test-user";
+import { RateLimitService } from "./core/RateLimitService";
 
-  for (let i = 0; i < 3; i++) {
-    const response = await request(app)
-      .get("/api/users")
-      .set("x-api-key", apiKey);
+import { RedisHealthCheck } from "./health/RedisHealthCheck";
 
-    expect(response.status).toBe(200);
-  }
+import { redisClient } from "./config/redis";
 
-  const response = await request(app)
-    .get("/api/users")
-    .set("x-api-key", apiKey);
+export function createApp(rateLimitService: RateLimitService) {
+  const app = express();
 
-  expect(response.status).toBe(429);
+  app.use(express.json());
 
-  expect(response.body).toMatchObject({
-    error: "Too Many Requests",
-    message: "Rate limit exceeded",
+  const redisHealthCheck = new RedisHealthCheck(redisClient);
+
+  app.get("/health", async (_req, res) => {
+    res.json({
+      status: "ok",
+    });
   });
 
-  expect(response.headers["retry-after"]).toBeDefined();
-});
+  app.get("/ready", async (_req, res) => {
+    const healthy = await redisHealthCheck.check();
+
+    if (!healthy) {
+      return res.status(503).json({
+        status: "not_ready",
+      });
+    }
+
+    return res.json({
+      status: "ready",
+    });
+  });
+
+  app.use(
+    rateLimiterMiddleware({
+      service: rateLimitService,
+    }),
+  );
+
+  app.get("/api/users", (_req, res) => {
+    res.json({
+      success: true,
+      message: "Users fetched successfully",
+    });
+  });
+
+  return app;
+}

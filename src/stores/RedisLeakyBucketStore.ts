@@ -1,6 +1,7 @@
 import { RedisClientType } from "redis";
 
 import { LeakyBucketStore } from "../core/LeakyBucketStore";
+import { RedisOperationExecutor } from "../infrastructure/RedisOperationExecutor";
 
 const LEAKY_BUCKET_SCRIPT = `
 local key = KEYS[1]
@@ -87,20 +88,20 @@ return {
 `;
 
 export class RedisLeakyBucketStore implements LeakyBucketStore {
-  constructor(private readonly redisClient: RedisClientType) {}
+  constructor(
+    private readonly redisClient: RedisClientType,
+    private readonly executor: RedisOperationExecutor,
+  ) {}
 
   async consume(key: string, now: number, capacity: number, leakRate: number) {
     const ttl = Math.ceil((capacity / leakRate) * 1000);
 
-    const result = await this.redisClient.eval(LEAKY_BUCKET_SCRIPT, {
-      keys: [key],
-      arguments: [
-        now.toString(),
-        capacity.toString(),
-        leakRate.toString(),
-        ttl.toString(),
-      ],
-    });
+    const result = await this.executor.execute(() =>
+      this.redisClient.eval(LEAKY_BUCKET_SCRIPT, {
+        keys: [key],
+        arguments: [now.toString(), capacity.toString(), leakRate.toString()],
+      }),
+    );
 
     if (!Array.isArray(result) || result.length !== 3) {
       throw new Error("Invalid Redis leaky bucket response");
