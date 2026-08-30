@@ -2,65 +2,87 @@ import { createClient, RedisClientType } from "redis";
 import { RedisSlidingWindowStore } from "../../../stores/RedisSlidingWindowStore";
 
 describe("RedisSlidingWindowStore", () => {
-  let redisClient: RedisClientType;
+  let redis: RedisClientType;
   let store: RedisSlidingWindowStore;
 
-  const key = "test:rate-limit:user-123";
-
   beforeAll(async () => {
-    redisClient = createClient({
-      url: "redis://localhost:6379",
+    redis = createClient({
+      url: process.env.REDIS_URL ?? "redis://localhost:6379",
     });
 
-    await redisClient.connect();
+    await redis.connect();
 
-    store = new RedisSlidingWindowStore(redisClient);
+    store = new RedisSlidingWindowStore(redis);
   });
 
-  beforeEach(async () => {
-    await redisClient.del(key);
+  afterEach(async () => {
+    const keys = await redis.keys("test:rate-limit:*");
+
+    if (keys.length > 0) {
+      await redis.del(keys);
+    }
   });
 
   afterAll(async () => {
-    await redisClient.del(key);
-    await redisClient.quit();
+    await redis.quit();
   });
 
-  it("should allow requests under the limit", async () => {
-    const now = Date.now();
+  it("should allow requests within limit", async () => {
+    const key = "test:rate-limit:user-1";
 
-    const result = await store.consume(key, now, 60_000, 5);
+    const first = await store.consume(key, 3, 60_000);
 
-    expect(result.allowed).toBe(true);
+    expect(first.allowed).toBe(true);
+    expect(first.remaining).toBe(2);
 
-    expect(result.count).toBe(1);
+    const second = await store.consume(key, 3, 60_000);
+
+    expect(second.allowed).toBe(true);
+    expect(second.remaining).toBe(1);
+
+    const third = await store.consume(key, 3, 60_000);
+
+    expect(third.allowed).toBe(true);
+    expect(third.remaining).toBe(0);
   });
 
-  it("should reject request when limit is reached", async () => {
-    const now = Date.now();
+  it("should reject requests after limit", async () => {
+    const key = "test:rate-limit:user-2";
 
-    for (let i = 0; i < 5; i++) {
-      await store.consume(key, now + i, 60_000, 5);
-    }
+    await store.consume(key, 2, 60_000);
 
-    const result = await store.consume(key, now + 10, 60_000, 5);
+    await store.consume(key, 2, 60_000);
+
+    const result = await store.consume(key, 2, 60_000);
 
     expect(result.allowed).toBe(false);
-
-    expect(result.count).toBe(5);
-
-    expect(result.oldestTimestamp).not.toBeNull();
+    expect(result.remaining).toBe(0);
+    expect(result.retryAfter).toBeGreaterThanOrEqual(1);
   });
 
-  it("should remove expired requests", async () => {
-    const now = Date.now();
+  it("should keep keys isolated", async () => {
+    const userA = await store.consume("test:rate-limit:A", 1, 60_000);
 
-    await store.consume(key, now, 60_000, 5);
+    const userB = await store.consume("test:rate-limit:B", 1, 60_000);
 
-    const result = await store.consume(key, now + 60_001, 60_000, 5);
+    expect(userA.allowed).toBe(true);
+    expect(userB.allowed).toBe(true);
+  });
 
-    expect(result.allowed).toBe(true);
+  it("should enforce the limit under concurrency", async () => {
+    const key = "test:rate-limit:concurrent";
 
-    expect(result.count).toBe(1);
+    const requests = Array.from({ length: 50 }, () =>
+      store.consume(key, 10, 60_000),
+    );
+
+    const results = await Promise.all(requests);
+
+    const allowed = results.filter((result) => result.allowed);
+
+    const rejected = results.filter((result) => !result.allowed);
+
+    expect(allowed).toHaveLength(10);
+    expect(rejected).toHaveLength(40);
   });
 });

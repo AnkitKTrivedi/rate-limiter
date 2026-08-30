@@ -1,96 +1,45 @@
 import { RedisClientType } from "redis";
 
-import { SlidingWindowStore } from "../core/SlidingWindowStore";
+import { slidingWindowScript } from "./scripts/slidingWindowScript";
+import { RedisOperationExecutor } from "../infrastructure/RedisOperationExecutor";
 
-const SLIDING_WINDOW_SCRIPT = `
-local key = KEYS[1]
-
-local now = tonumber(ARGV[1])
-local windowStart = tonumber(ARGV[2])
-local limit = tonumber(ARGV[3])
-local windowMs = tonumber(ARGV[4])
-local requestId = ARGV[5]
-
-redis.call(
-    "ZREMRANGEBYSCORE",
-    key,
-    0,
-    windowStart
-)
-
-local count =
-    redis.call("ZCARD", key)
-
-if count >= limit then
-
-    local oldest =
-        redis.call(
-            "ZRANGE",
-            key,
-            0,
-            0,
-            "WITHSCORES"
-        )
-
-    local oldestTimestamp = 0
-
-    if #oldest > 0 then
-        oldestTimestamp =
-            tonumber(oldest[2])
-    end
-
-    return {
-        0,
-        count,
-        oldestTimestamp
-    }
-end
-
-redis.call(
-    "ZADD",
-    key,
-    now,
-    requestId
-)
-
-redis.call(
-    "PEXPIRE",
-    key,
-    windowMs
-)
-
-return {
-    1,
-    count + 1,
-    0
+export interface SlidingWindowStoreResult {
+  allowed: boolean;
+  limit: number;
+  remaining: number;
+  retryAfter: number;
 }
-`;
 
-export class RedisSlidingWindowStore implements SlidingWindowStore {
-  constructor(private readonly redisClient: RedisClientType) {}
+export class RedisSlidingWindowStore {
+  constructor(private readonly redis: RedisClientType) {}
 
-  async consume(key: string, now: number, windowMs: number, limit: number) {
-    const requestId = `${now}:${crypto.randomUUID()}`;
+  async consume(
+    key: string,
+    limit: number,
+    windowMs: number,
+  ): Promise<SlidingWindowStoreResult> {
+    const now = Date.now();
 
-    const result = await this.redisClient.eval(SLIDING_WINDOW_SCRIPT, {
+    const requestId = `${now}-${Math.random().toString(36).slice(2)}`;
+
+    const expirySeconds = Math.ceil(windowMs / 1000) + 1;
+
+    const result = (await this.redis.eval(slidingWindowScript, {
       keys: [key],
       arguments: [
         now.toString(),
-        (now - windowMs).toString(),
-        limit.toString(),
         windowMs.toString(),
+        limit.toString(),
         requestId,
+        expirySeconds.toString(),
       ],
-    });
-
-    if (!Array.isArray(result) || result.length !== 3) {
-      throw new Error("Invalid Redis sliding window response");
-    }
+    })) as number[];
 
     return {
-      allowed: Number(result[0]) === 1,
-      count: Number(result[1]),
-      oldestTimestamp: Number(result[2]) || null,
+      allowed: result[0] === 1,
+      limit: result[1],
+      remaining: result[2],
+      retryAfter: result[3],
     };
   }
 }

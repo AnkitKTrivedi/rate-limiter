@@ -1,12 +1,14 @@
+export const slidingWindowScript = `
 local key = KEYS[1]
 
 local now = tonumber(ARGV[1])
-local windowStart = tonumber(ARGV[2])
+local windowMs = tonumber(ARGV[2])
 local limit = tonumber(ARGV[3])
-local requestId = ARGV[4]
+local requestId = ARGV[4])
 local expirySeconds = tonumber(ARGV[5])
 
--- Remove requests outside the sliding window
+local windowStart = now - windowMs
+
 redis.call(
   "ZREMRANGEBYSCORE",
   key,
@@ -14,13 +16,11 @@ redis.call(
   windowStart
 )
 
--- Count requests currently inside the window
 local count = redis.call(
   "ZCARD",
   key
 )
 
--- Reject when the limit has already been reached
 if count >= limit then
   local oldest = redis.call(
     "ZRANGE",
@@ -33,8 +33,15 @@ if count >= limit then
   local retryAfter = 0
 
   if oldest[2] then
-    retryAfter = math.ceil(
-      (tonumber(oldest[2]) + (now - windowStart)) / 1000
+    retryAfter = math.max(
+      1,
+      math.ceil(
+        (
+          tonumber(oldest[2]) +
+          windowMs -
+          now
+        ) / 1000
+      )
     )
   end
 
@@ -46,7 +53,6 @@ if count >= limit then
   }
 end
 
--- Add current request
 redis.call(
   "ZADD",
   key,
@@ -54,7 +60,6 @@ redis.call(
   requestId
 )
 
--- Expire the Redis key so inactive clients don't leak memory
 redis.call(
   "EXPIRE",
   key,
@@ -69,3 +74,4 @@ return {
   remaining,
   0
 }
+`;
