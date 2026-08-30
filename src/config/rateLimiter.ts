@@ -1,11 +1,20 @@
 import { FixedWindow } from "../algorithms/fixed-window/FixedWindow";
+import { SlidingWindow } from "../algorithms/sliding-window/SlidingWindow";
 import { RateLimiter } from "../core/RateLimiter";
+import { RedisSlidingWindowStore } from "../stores/RedisSlidingWindowStore";
 import { RedisStore } from "../stores/RedisStores";
 import { redisClient } from "./redis";
 
-const store = new RedisStore(redisClient);
+// const store = new RedisStore(redisClient);
 
-const algorithm = new FixedWindow(store, {
+// const algorithm = new FixedWindow(store, {
+//   limit: 5,
+//   windowMs: 60 * 1000,
+// });
+
+const store = new RedisSlidingWindowStore(redisClient);
+
+const algorithm = new SlidingWindow(store, {
   limit: 5,
   windowMs: 60 * 1000,
 });
