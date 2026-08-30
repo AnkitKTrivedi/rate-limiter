@@ -412,14 +412,6 @@ Before production deployment, the following should be completed or evaluated:
 - [x] Docker support
 - [x] HLD documentation
 - [x] Repository documentation
-- [ ] Redis atomic Lua scripts
-- [ ] Integration tests
-- [ ] Concurrency tests
-- [ ] Redis resilience
-- [ ] Load testing
-
----
-
-## License
-
-This project is intended as a technical demonstration and production-oriented reference implementation.
+- [x] Redis atomic Lua scripts
+- [x] Integration tests
+- [x] Concurrency tests
