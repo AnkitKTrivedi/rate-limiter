@@ -19,6 +19,7 @@ import { LeakyBucket } from "../algorithms/leaky-bucket/LeakyBucket";
 import { RateLimitPolicy } from "../core/RateLimitPolicy";
 
 import { redisClient } from "./redis";
+import { FailOpenStrategy } from "../core/failure/FailOpenStrategy";
 
 export function createRateLimitService(
   policies: RateLimitPolicy[],
@@ -40,6 +41,8 @@ export function createRateLimitService(
   const leakyBucketStore = new RedisLeakyBucketStore(redis);
 
   const registry = new AlgorithmRegistry();
+
+  const failureStrategy = new FailOpenStrategy();
 
   registry.register("fixed-window", (policy) => {
     if (policy.algorithm !== "fixed-window") {
@@ -91,5 +94,5 @@ export function createRateLimitService(
 
   const policyEngine = new PolicyEngine(resolver, keyGenerator);
 
-  return new RateLimitService(policyEngine, registry);
+  return new RateLimitService(policyEngine, registry, failureStrategy);
 }

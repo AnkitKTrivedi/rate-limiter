@@ -5,29 +5,35 @@ import { AlgorithmRegistry } from "./AlgorithmRegistry";
 import { RateLimitContext } from "./PolicyResolver";
 
 import { RateLimitResult } from "./RateLimitResult";
+import { RateLimitFailureStrategy } from "./RateLimitFailureStrategy";
 
 export class RateLimitService {
   constructor(
     private readonly policyEngine: PolicyEngine,
     private readonly algorithmRegistry: AlgorithmRegistry,
+    private readonly failureStrategy: RateLimitFailureStrategy,
   ) {}
 
   async check(context: RateLimitContext): Promise<RateLimitResult | null> {
-    const resolvedPolicies = this.policyEngine.resolve(context);
+    try {
+      const resolvedPolicies = this.policyEngine.resolve(context);
 
-    if (resolvedPolicies.length === 0) {
-      return null;
+      if (resolvedPolicies.length === 0) {
+        return null;
+      }
+
+      const results = await Promise.all(
+        resolvedPolicies.map(async ({ policy, key }) => {
+          const algorithm = this.algorithmRegistry.create(policy);
+
+          return algorithm.consume(key);
+        }),
+      );
+
+      return this.combineResults(results);
+    } catch (error) {
+      return this.failureStrategy.handle(error, context);
     }
-
-    const results = await Promise.all(
-      resolvedPolicies.map(async ({ policy, key }) => {
-        const algorithm = this.algorithmRegistry.create(policy);
-
-        return algorithm.consume(key);
-      }),
-    );
-
-    return this.combineResults(results);
   }
 
   private combineResults(results: RateLimitResult[]): RateLimitResult {

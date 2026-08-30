@@ -10,9 +10,14 @@ describe("RateLimitService", () => {
       create: jest.fn(),
     };
 
+    const failureStrategy = {
+      create: jest.fn(),
+    };
+
     const service = new RateLimitService(
       policyEngine as any,
       algorithmRegistry as any,
+      failureStrategy as any,
     );
 
     return {
