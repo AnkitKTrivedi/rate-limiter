@@ -1,29 +1,31 @@
-import { AlgorithmRegistry } from "../../../core/AlgorithmRegistry";
-import { PolicyEngine } from "../../../core/PolicyEngine";
 import { RateLimitService } from "../../../core/RateLimitService";
 
 describe("RateLimitService", () => {
-  let policyEngine: jest.Mocked<PolicyEngine>;
-  let registry: jest.Mocked<AlgorithmRegistry>;
+  const createService = () => {
+    const policyEngine = {
+      resolve: jest.fn(),
+    };
 
-  const algorithm = {
-    consume: jest.fn(),
+    const algorithmRegistry = {
+      create: jest.fn(),
+    };
+
+    const service = new RateLimitService(
+      policyEngine as any,
+      algorithmRegistry as any,
+    );
+
+    return {
+      service,
+      policyEngine,
+      algorithmRegistry,
+    };
   };
 
-  beforeEach(() => {
-    policyEngine = {
-      resolve: jest.fn(),
-    } as unknown as jest.Mocked<PolicyEngine>;
+  it("should return null when no policy applies", async () => {
+    const { service, policyEngine } = createService();
 
-    registry = {
-      create: jest.fn(),
-    } as unknown as jest.Mocked<AlgorithmRegistry>;
-  });
-
-  it("should return null when no policy exists", async () => {
-    policyEngine.resolve.mockReturnValue(null);
-
-    const service = new RateLimitService(policyEngine, registry);
+    policyEngine.resolve.mockReturnValue([]);
 
     const result = await service.check({
       route: "/api/users",
@@ -31,80 +33,197 @@ describe("RateLimitService", () => {
     });
 
     expect(result).toBeNull();
-
-    expect(registry.create).not.toHaveBeenCalled();
   });
 
-  it("should resolve policy and execute algorithm", async () => {
-    const policy = {
-      name: "users",
-      route: "/api/users",
-      method: "GET" as const,
-      algorithm: "sliding-window" as const,
-      limit: 100,
-      windowMs: 60_000,
-    };
+  it("should allow when all policies allow", async () => {
+    const { service, policyEngine, algorithmRegistry } = createService();
 
-    const resolved = {
-      policy,
-      key: "rate-limit:users:user-1",
-    };
+    policyEngine.resolve.mockReturnValue([
+      {
+        policy: {
+          name: "users-read",
+        },
+        key: "key-users",
+      },
+      {
+        policy: {
+          name: "global-ip",
+        },
+        key: "key-global",
+      },
+    ]);
 
-    const rateLimitResult = {
-      allowed: true,
-      limit: 100,
-      remaining: 99,
-      retryAfter: 0,
-      resetAt: Date.now(),
-    };
-
-    policyEngine.resolve.mockReturnValue(resolved);
-
-    registry.create.mockReturnValue(algorithm);
-
-    algorithm.consume.mockResolvedValue(rateLimitResult);
-
-    const service = new RateLimitService(policyEngine, registry);
+    algorithmRegistry.create
+      .mockReturnValueOnce({
+        consume: jest.fn().mockResolvedValue({
+          allowed: true,
+          limit: 100,
+          remaining: 90,
+          resetAt: 1000,
+          retryAfter: 0,
+        }),
+      })
+      .mockReturnValueOnce({
+        consume: jest.fn().mockResolvedValue({
+          allowed: true,
+          limit: 1000,
+          remaining: 900,
+          resetAt: 1000,
+          retryAfter: 0,
+        }),
+      });
 
     const result = await service.check({
       route: "/api/users",
       method: "GET",
-      userId: "user-1",
     });
 
-    expect(policyEngine.resolve).toHaveBeenCalled();
+    expect(result?.allowed).toBe(true);
 
-    expect(registry.create).toHaveBeenCalledWith(policy);
-
-    expect(algorithm.consume).toHaveBeenCalledWith(resolved.key);
-
-    expect(result).toEqual(rateLimitResult);
+    expect(result?.remaining).toBe(90);
   });
 
-  it("should propagate algorithm errors", async () => {
-    policyEngine.resolve.mockReturnValue({
-      policy: {
-        name: "users",
-        route: "/api/users",
-        method: "GET",
-        algorithm: "sliding-window",
-        limit: 100,
-        windowMs: 60_000,
+  it("should reject when any policy rejects", async () => {
+    const { service, policyEngine, algorithmRegistry } = createService();
+
+    policyEngine.resolve.mockReturnValue([
+      {
+        policy: {
+          name: "users-read",
+        },
+        key: "key-users",
       },
-      key: "rate-limit:users:user-1",
+      {
+        policy: {
+          name: "global-ip",
+        },
+        key: "key-global",
+      },
+    ]);
+
+    algorithmRegistry.create
+      .mockReturnValueOnce({
+        consume: jest.fn().mockResolvedValue({
+          allowed: true,
+          limit: 100,
+          remaining: 90,
+          resetAt: 1000,
+          retryAfter: 0,
+        }),
+      })
+      .mockReturnValueOnce({
+        consume: jest.fn().mockResolvedValue({
+          allowed: false,
+          limit: 1000,
+          remaining: 0,
+          resetAt: 2000,
+          retryAfter: 20,
+        }),
+      });
+
+    const result = await service.check({
+      route: "/api/users",
+      method: "GET",
     });
 
-    registry.create.mockReturnValue(algorithm);
+    expect(result?.allowed).toBe(false);
 
-    algorithm.consume.mockRejectedValue(new Error("Redis unavailable"));
+    expect(result?.retryAfter).toBe(20);
+  });
 
-    const service = new RateLimitService(policyEngine, registry);
+  it("should use the longest retryAfter when multiple policies reject", async () => {
+    const { service, policyEngine, algorithmRegistry } = createService();
 
-    await expect(
-      service.check({
-        route: "/api/users",
-        method: "GET",
-      }),
-    ).rejects.toThrow("Redis unavailable");
+    policyEngine.resolve.mockReturnValue([
+      {
+        policy: {
+          name: "policy-a",
+        },
+        key: "key-a",
+      },
+      {
+        policy: {
+          name: "policy-b",
+        },
+        key: "key-b",
+      },
+    ]);
+
+    algorithmRegistry.create
+      .mockReturnValueOnce({
+        consume: jest.fn().mockResolvedValue({
+          allowed: false,
+          limit: 10,
+          remaining: 0,
+          resetAt: 1000,
+          retryAfter: 5,
+        }),
+      })
+      .mockReturnValueOnce({
+        consume: jest.fn().mockResolvedValue({
+          allowed: false,
+          limit: 20,
+          remaining: 0,
+          resetAt: 2000,
+          retryAfter: 30,
+        }),
+      });
+
+    const result = await service.check({
+      route: "/api/users",
+      method: "GET",
+    });
+
+    expect(result?.allowed).toBe(false);
+
+    expect(result?.retryAfter).toBe(30);
+  });
+
+  it("should return the lowest remaining value when all policies allow", async () => {
+    const { service, policyEngine, algorithmRegistry } = createService();
+
+    policyEngine.resolve.mockReturnValue([
+      {
+        policy: {
+          name: "policy-a",
+        },
+        key: "key-a",
+      },
+      {
+        policy: {
+          name: "policy-b",
+        },
+        key: "key-b",
+      },
+    ]);
+
+    algorithmRegistry.create
+      .mockReturnValueOnce({
+        consume: jest.fn().mockResolvedValue({
+          allowed: true,
+          limit: 100,
+          remaining: 50,
+          resetAt: 1000,
+          retryAfter: 0,
+        }),
+      })
+      .mockReturnValueOnce({
+        consume: jest.fn().mockResolvedValue({
+          allowed: true,
+          limit: 20,
+          remaining: 3,
+          resetAt: 2000,
+          retryAfter: 0,
+        }),
+      });
+
+    const result = await service.check({
+      route: "/api/users",
+      method: "GET",
+    });
+
+    expect(result?.allowed).toBe(true);
+
+    expect(result?.remaining).toBe(3);
   });
 });

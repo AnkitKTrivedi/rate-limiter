@@ -13,14 +13,36 @@ export class RateLimitService {
   ) {}
 
   async check(context: RateLimitContext): Promise<RateLimitResult | null> {
-    const resolved = this.policyEngine.resolve(context);
+    const resolvedPolicies = this.policyEngine.resolve(context);
 
-    if (!resolved) {
+    if (resolvedPolicies.length === 0) {
       return null;
     }
 
-    const algorithm = this.algorithmRegistry.create(resolved.policy);
+    const results = await Promise.all(
+      resolvedPolicies.map(async ({ policy, key }) => {
+        const algorithm = this.algorithmRegistry.create(policy);
 
-    return algorithm.consume(resolved.key);
+        return algorithm.consume(key);
+      }),
+    );
+
+    return this.combineResults(results);
+  }
+
+  private combineResults(results: RateLimitResult[]): RateLimitResult {
+    const rejectedResult = results.find((result) => !result.allowed);
+
+    if (rejectedResult) {
+      return rejectedResult;
+    }
+
+    return results.reduce((mostRestrictive, current) => {
+      if (current.remaining < mostRestrictive.remaining) {
+        return current;
+      }
+
+      return mostRestrictive;
+    });
   }
 }

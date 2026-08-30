@@ -15,18 +15,16 @@ export class PolicyEngine {
     private readonly keyGenerator: RateLimitKeyGenerator,
   ) {}
 
-  resolve(context: RateLimitContext): ResolvedRateLimitPolicy | null {
-    const policy = this.resolver.resolve(context);
+  resolve(context: RateLimitContext): ResolvedRateLimitPolicy[] {
+    const policies = this.resolver.resolve(context);
 
-    if (!policy) {
-      return null;
+    if (policies.length === 0) {
+      return [];
     }
 
-    const key = this.keyGenerator.generate(context, policy);
-
-    return {
+    return policies.map((policy) => ({
       policy,
-      key,
-    };
+      key: this.keyGenerator.generate(context, policy),
+    }));
   }
 }

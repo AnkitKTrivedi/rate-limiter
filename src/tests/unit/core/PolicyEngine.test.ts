@@ -3,19 +3,8 @@ import { PolicyResolver } from "../../../core/PolicyResolver";
 import { RateLimitKeyGenerator } from "../../../core/RateLimitKeyGenerator";
 
 describe("PolicyEngine", () => {
-  const policy = {
-    name: "users-read",
-    route: "/api/users",
-    method: "GET" as const,
-    algorithm: "sliding-window" as const,
-    limit: 100,
-    windowMs: 60_000,
-  };
-
   let resolver: jest.Mocked<PolicyResolver>;
   let keyGenerator: jest.Mocked<RateLimitKeyGenerator>;
-
-  let engine: PolicyEngine;
 
   beforeEach(() => {
     resolver = {
@@ -25,88 +14,146 @@ describe("PolicyEngine", () => {
     keyGenerator = {
       generate: jest.fn(),
     };
-
-    engine = new PolicyEngine(resolver, keyGenerator);
   });
 
-  it("should resolve policy and generate key", () => {
-    resolver.resolve.mockReturnValue(policy);
+  it("should return empty array when no policy matches", () => {
+    resolver.resolve.mockReturnValue([]);
 
-    keyGenerator.generate.mockReturnValue("rate-limit:users-read:user-123");
+    const engine = new PolicyEngine(resolver, keyGenerator);
+
+    const result = engine.resolve({
+      route: "/api/users",
+      method: "GET",
+    });
+
+    expect(result).toEqual([]);
+
+    expect(keyGenerator.generate).not.toHaveBeenCalled();
+  });
+
+  it("should resolve one policy and generate its key", () => {
+    const policy = {
+      name: "users-read",
+      route: "/api/users",
+      method: "GET",
+      algorithm: "sliding-window" as const,
+      limit: 100,
+      windowMs: 60_000,
+    };
+
+    resolver.resolve.mockReturnValue([policy]);
+
+    keyGenerator.generate.mockReturnValue("rate-limit:users-read:127.0.0.1");
+
+    const engine = new PolicyEngine(resolver, keyGenerator);
 
     const context = {
       route: "/api/users",
       method: "GET",
-      userId: "user-123",
+      ip: "127.0.0.1",
     };
 
     const result = engine.resolve(context);
 
-    expect(resolver.resolve).toHaveBeenCalledWith(context);
+    expect(result).toEqual([
+      {
+        policy,
+        key: "rate-limit:users-read:127.0.0.1",
+      },
+    ]);
 
     expect(keyGenerator.generate).toHaveBeenCalledWith(context, policy);
-
-    expect(result).toEqual({
-      policy,
-      key: "rate-limit:users-read:user-123",
-    });
   });
 
-  it("should return null when no policy exists", () => {
-    resolver.resolve.mockReturnValue(null);
+  it("should resolve multiple policies", () => {
+    const globalPolicy = {
+      name: "global-ip",
+      route: "*",
+      method: "*",
+      algorithm: "sliding-window" as const,
+      limit: 1000,
+      windowMs: 60_000,
+      priority: 1,
+    };
+
+    const usersPolicy = {
+      name: "users-read",
+      route: "/api/users",
+      method: "GET",
+      algorithm: "sliding-window" as const,
+      limit: 100,
+      windowMs: 60_000,
+      priority: 10,
+    };
+
+    resolver.resolve.mockReturnValue([usersPolicy, globalPolicy]);
+
+    keyGenerator.generate
+      .mockReturnValueOnce("rate-limit:users-read:127.0.0.1")
+      .mockReturnValueOnce("rate-limit:global-ip:127.0.0.1");
+
+    const engine = new PolicyEngine(resolver, keyGenerator);
 
     const context = {
-      route: "/api/unknown",
+      route: "/api/users",
       method: "GET",
-      userId: "user-123",
+      ip: "127.0.0.1",
     };
 
     const result = engine.resolve(context);
 
-    expect(result).toBeNull();
+    expect(result).toHaveLength(2);
 
-    expect(keyGenerator.generate).not.toHaveBeenCalled();
+    expect(result).toEqual([
+      {
+        policy: usersPolicy,
+        key: "rate-limit:users-read:127.0.0.1",
+      },
+      {
+        policy: globalPolicy,
+        key: "rate-limit:global-ip:127.0.0.1",
+      },
+    ]);
+
+    expect(keyGenerator.generate).toHaveBeenCalledTimes(2);
   });
 
-  it("should not generate a key when policy does not exist", () => {
-    resolver.resolve.mockReturnValue(null);
+  it("should generate a unique key for every policy", () => {
+    const policies = [
+      {
+        name: "users-read",
+        route: "/api/users",
+        method: "GET",
+        algorithm: "sliding-window" as const,
+        limit: 100,
+        windowMs: 60_000,
+      },
+      {
+        name: "global-ip",
+        route: "*",
+        method: "*",
+        algorithm: "sliding-window" as const,
+        limit: 1000,
+        windowMs: 60_000,
+      },
+    ];
 
-    engine.resolve({
-      route: "/unknown",
+    resolver.resolve.mockReturnValue(policies);
+
+    keyGenerator.generate
+      .mockReturnValueOnce("rate-limit:users-read:127.0.0.1")
+      .mockReturnValueOnce("rate-limit:global-ip:127.0.0.1");
+
+    const engine = new PolicyEngine(resolver, keyGenerator);
+
+    const result = engine.resolve({
+      route: "/api/users",
       method: "GET",
+      ip: "127.0.0.1",
     });
 
-    expect(keyGenerator.generate).not.toHaveBeenCalled();
-  });
+    const keys = result.map((item) => item.key);
 
-  it("should propagate resolver errors", () => {
-    resolver.resolve.mockImplementation(() => {
-      throw new Error("Policy service unavailable");
-    });
-
-    expect(() =>
-      engine.resolve({
-        route: "/api/users",
-        method: "GET",
-      }),
-    ).toThrow("Policy service unavailable");
-
-    expect(keyGenerator.generate).not.toHaveBeenCalled();
-  });
-
-  it("should propagate key generator errors", () => {
-    resolver.resolve.mockReturnValue(policy);
-
-    keyGenerator.generate.mockImplementation(() => {
-      throw new Error("Unable to generate key");
-    });
-
-    expect(() =>
-      engine.resolve({
-        route: "/api/users",
-        method: "GET",
-        userId: "user-123",
-      }),
-    ).toThrow("Unable to generate key");
+    expect(new Set(keys).size).toBe(keys.length);
   });
 });

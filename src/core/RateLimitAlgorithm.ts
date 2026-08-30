@@ -15,4 +15,5 @@ export interface BasePolicy {
   algorithm: RateLimitAlgorithmType;
   method?: string;
   route: string;
+  priority?: number;
 }
