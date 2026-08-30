@@ -1,22 +1,24 @@
 import express from "express";
-
-import { rateLimiter } from "./config/rateLimiter";
 import { rateLimiterMiddleware } from "./middleware/rateLimiter";
+import { RateLimitService } from "./core/RateLimitService";
 
-const app = express();
+export const createApp = (rateLimitService: RateLimitService) => {
+  const app = express();
 
-app.use(express.json());
+  app.use(express.json());
 
-app.use(
-  "/api",
-  rateLimiterMiddleware(rateLimiter, (req) => `rate-limit:ip:${req.ip}`),
-);
+  app.use(
+    rateLimiterMiddleware({
+      service: rateLimitService,
+    }),
+  );
 
-app.get("/api/users", (req, res) => {
-  res.json({
-    success: true,
-    message: "Users fetched successfully",
+  app.get("/api/users", (_req, res) => {
+    res.json({
+      success: true,
+      message: "Users fetched successfully",
+    });
   });
-});
 
-export default app;
+  return app;
+};

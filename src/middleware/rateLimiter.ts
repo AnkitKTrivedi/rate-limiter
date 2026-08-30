@@ -1,39 +1,65 @@
 import { Request, Response, NextFunction } from "express";
 
-import { RateLimiter } from "../core/RateLimiter";
-import { KeyGenerator } from "../core/keyGenerator";
+import { RateLimitService } from "../core/RateLimitService";
 
-export const rateLimiterMiddleware = (
-  rateLimiter: RateLimiter,
-  keyGenerator: KeyGenerator,
-) => {
-  return async (
-    req: Request,
-    res: Response,
-    next: NextFunction,
-  ): Promise<void> => {
-    const key = keyGenerator(req);
+export interface RateLimiterMiddlewareOptions {
+  service: RateLimitService;
+}
 
-    const result = await rateLimiter.check(key);
+export function rateLimiterMiddleware(options: RateLimiterMiddlewareOptions) {
+  const { service } = options;
 
-    res.setHeader("RateLimit-Limit", result.limit);
+  return async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const context = {
+        route: req.route?.path ?? req.path,
 
-    res.setHeader("RateLimit-Remaining", result.remaining);
+        method: req.method,
 
-    res.setHeader("RateLimit-Reset", result.resetAt);
+        ip: req.ip,
 
-    if (!result.allowed) {
-      res.setHeader("Retry-After", result.retryAfter);
+        userId: (
+          req as Request & {
+            user?: {
+              id?: string;
+            };
+          }
+        ).user?.id,
 
-      res.status(429).json({
-        success: false,
-        message: "Too many requests",
-        retryAfter: result.retryAfter,
-      });
+        apiKey: req.headers["x-api-key"] as string | undefined,
+      };
 
-      return;
+      const result = await service.check(context);
+
+      // No policy = no rate limiting
+      if (!result) {
+        return next();
+      }
+
+      res.setHeader("RateLimit-Limit", result.limit);
+
+      res.setHeader("RateLimit-Remaining", result.remaining);
+
+      res.setHeader(
+        "RateLimit-Reset",
+        Math.ceil((result.resetAt - Date.now()) / 1000),
+      );
+
+      if (!result.allowed) {
+        res.setHeader("Retry-After", result.retryAfter);
+
+        return res.status(429).json({
+          error: "Too Many Requests",
+
+          message: "Rate limit exceeded",
+
+          retryAfter: result.retryAfter,
+        });
+      }
+
+      next();
+    } catch (error) {
+      next(error);
     }
-
-    next();
   };
-};
+}

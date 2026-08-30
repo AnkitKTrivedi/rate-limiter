@@ -1,75 +1,89 @@
 import { Request, Response, NextFunction } from "express";
-import { RateLimiter } from "../../../core/RateLimiter";
 import { rateLimiterMiddleware } from "../../../middleware/rateLimiter";
 
 describe("rateLimiterMiddleware", () => {
-  let rateLimiter: jest.Mocked<RateLimiter>;
-  let req: Partial<Request>;
-  let res: Partial<Response>;
-  let next: jest.MockedFunction<NextFunction>;
-
-  beforeEach(() => {
-    rateLimiter = {
-      check: jest.fn(),
-    } as unknown as jest.Mocked<RateLimiter>;
-
-    req = {
-      ip: "127.0.0.1",
-    };
-
-    res = {
+  const createMockResponse = () => {
+    const res = {
       setHeader: jest.fn(),
-      status: jest.fn().mockReturnThis(),
-      json: jest.fn().mockReturnThis(),
+      status: jest.fn(),
+      json: jest.fn(),
     };
 
-    next = jest.fn();
-  });
+    res.status.mockReturnValue(res);
 
-  it("should call next when request is allowed", async () => {
-    rateLimiter.check.mockResolvedValue({
-      allowed: true,
-      limit: 5,
-      remaining: 4,
-      retryAfter: 0,
-      resetAt: Date.now() + 60_000,
+    return res as unknown as Response;
+  };
+
+  it("should allow request", async () => {
+    const service = {
+      check: jest.fn().mockResolvedValue({
+        allowed: true,
+        limit: 100,
+        remaining: 99,
+        resetAt: Date.now() + 60000,
+        retryAfter: 0,
+      }),
+    };
+
+    const middleware = rateLimiterMiddleware({
+      service: service as any,
     });
 
-    const middleware = rateLimiterMiddleware(
-      rateLimiter,
-      (req) => `ip:${req.ip}`,
-    );
+    const req = {
+      method: "GET",
+      path: "/api/users",
+      ip: "127.0.0.1",
+      headers: {},
+    } as Request;
 
-    await middleware(req as Request, res as Response, next);
+    const res = createMockResponse();
 
-    expect(rateLimiter.check).toHaveBeenCalledWith("ip:127.0.0.1");
+    const next = jest.fn() as NextFunction;
+
+    await middleware(req, res, next);
 
     expect(next).toHaveBeenCalled();
 
-    expect(res.status).not.toHaveBeenCalled();
+    expect(res.setHeader).toHaveBeenCalledWith("RateLimit-Limit", 100);
+
+    expect(res.setHeader).toHaveBeenCalledWith("RateLimit-Remaining", 99);
   });
 
   it("should return 429 when request is rejected", async () => {
-    rateLimiter.check.mockResolvedValue({
-      allowed: false,
-      limit: 5,
-      remaining: 0,
-      retryAfter: 10,
-      resetAt: Date.now() + 10_000,
+    const service = {
+      check: jest.fn().mockResolvedValue({
+        allowed: false,
+        limit: 5,
+        remaining: 0,
+        resetAt: Date.now() + 10000,
+        retryAfter: 10,
+      }),
+    };
+
+    const middleware = rateLimiterMiddleware({
+      service: service as any,
     });
 
-    const middleware = rateLimiterMiddleware(
-      rateLimiter,
-      (req) => `ip:${req.ip}`,
-    );
+    const req = {
+      method: "GET",
+      path: "/api/users",
+      ip: "127.0.0.1",
+      headers: {},
+    } as Request;
 
-    await middleware(req as Request, res as Response, next);
+    const res = createMockResponse();
+
+    const next = jest.fn() as NextFunction;
+
+    await middleware(req, res, next);
 
     expect(res.status).toHaveBeenCalledWith(429);
 
+    expect(res.setHeader).toHaveBeenCalledWith("Retry-After", 10);
+
     expect(res.json).toHaveBeenCalledWith({
-      success: false,
-      message: "Too many requests",
+      error: "Too Many Requests",
+      message: "Rate limit exceeded",
       retryAfter: 10,
     });
 
