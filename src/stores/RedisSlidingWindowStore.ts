@@ -1,16 +1,10 @@
 import { RedisClientType } from "redis";
 
-import { slidingWindowScript } from "./scripts/slidingWindowScript";
 import { RedisOperationExecutor } from "../infrastructure/RedisOperationExecutor";
+import { SlidingWindowStore } from "../core/SlidingWindowStore";
+import { slidingWindowScript } from "./scripts/slidingWindowScript";
 
-export interface SlidingWindowStoreResult {
-  allowed: boolean;
-  limit: number;
-  remaining: number;
-  retryAfter: number;
-}
-
-export class RedisSlidingWindowStore {
+export class RedisSlidingWindowStore implements SlidingWindowStore {
   constructor(
     private readonly redis: RedisClientType,
     private readonly executor: RedisOperationExecutor,
@@ -18,11 +12,14 @@ export class RedisSlidingWindowStore {
 
   async consume(
     key: string,
-    limit: number,
+    now: number,
     windowMs: number,
-  ): Promise<SlidingWindowStoreResult> {
-    const now = Date.now();
-
+    limit: number,
+  ): Promise<{
+    allowed: boolean;
+    count: number;
+    oldestTimestamp: number | null;
+  }> {
     const requestId = `${now}-${Math.random().toString(36).slice(2)}`;
 
     const expirySeconds = Math.ceil(windowMs / 1000) + 1;
@@ -48,13 +45,13 @@ export class RedisSlidingWindowStore {
       throw new Error("Invalid response from Redis sliding-window script");
     }
 
-    const [allowed, resultLimit, remaining, retryAfter] = result;
+    const [allowed, count, oldestTimestamp] = result;
 
     return {
       allowed: Number(allowed) === 1,
-      limit: Number(resultLimit),
-      remaining: Number(remaining),
-      retryAfter: Number(retryAfter),
+      count: Number(count),
+      oldestTimestamp:
+        oldestTimestamp === null ? null : Number(oldestTimestamp),
     };
   }
 }

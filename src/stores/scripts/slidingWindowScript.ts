@@ -22,6 +22,7 @@ local count = redis.call(
 )
 
 if count >= limit then
+
   local oldest = redis.call(
     "ZRANGE",
     key,
@@ -30,26 +31,16 @@ if count >= limit then
     "WITHSCORES"
   )
 
-  local retryAfter = 0
+  local oldestTimestamp = nil
 
   if oldest[2] then
-    retryAfter = math.max(
-      1,
-      math.ceil(
-        (
-          tonumber(oldest[2]) +
-          windowMs -
-          now
-        ) / 1000
-      )
-    )
+    oldestTimestamp = tonumber(oldest[2])
   end
 
   return {
     0,
-    limit,
-    0,
-    retryAfter
+    count,
+    oldestTimestamp
   }
 end
 
@@ -66,12 +57,25 @@ redis.call(
   expirySeconds
 )
 
-local remaining = limit - count - 1
+count = count + 1
+
+local oldest = redis.call(
+  "ZRANGE",
+  key,
+  0,
+  0,
+  "WITHSCORES"
+)
+
+local oldestTimestamp = nil
+
+if oldest[2] then
+  oldestTimestamp = tonumber(oldest[2])
+end
 
 return {
   1,
-  limit,
-  remaining,
-  0
+  count,
+  oldestTimestamp
 }
 `;
