@@ -1,11 +1,13 @@
-import { RateLimitResult, RateLimitStore } from "../core/types";
+import { RateLimitAlgorithm } from "../../core/RateLimitAlgorithm";
+import { RateLimitResult } from "../../core/RateLimitResult";
+import { RateLimitStore } from "../../core/RateLimitStore";
 
 interface FixedWindowsOptions {
   limit: number;
   windowMs: number;
 }
 
-export class FixedWindow {
+export class FixedWindow implements RateLimitAlgorithm {
   constructor(
     private readonly store: RateLimitStore,
     private readonly options: FixedWindowsOptions,

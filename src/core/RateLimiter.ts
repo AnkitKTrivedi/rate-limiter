@@ -1,4 +1,5 @@
-import { RateLimitAlgorithm, RateLimitResult } from "./types";
+import { RateLimitAlgorithm } from "./RateLimitAlgorithm";
+import { RateLimitResult } from "./RateLimitResult";
 
 export class RateLimiter {
   constructor(private readonly algorithm: RateLimitAlgorithm) {}

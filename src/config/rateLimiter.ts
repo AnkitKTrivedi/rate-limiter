@@ -1,4 +1,4 @@
-import { FixedWindow } from "../algorithms/FixedWindow";
+import { FixedWindow } from "../algorithms/fixed-window/FixedWindow";
 import { RateLimiter } from "../core/RateLimiter";
 import { RedisStore } from "../stores/RedisStores";
 import { redisClient } from "./redis";

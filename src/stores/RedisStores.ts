@@ -1,5 +1,20 @@
 import { RedisClientType } from "redis";
-import { RateLimitStore } from "../core/types";
+import { RateLimitStore } from "../core/RateLimitStore";
+
+const FIXED_WINDOW_SCRIPT = `
+local current = redis.call("INCR", KEYS[1])
+
+if current == 1 then
+    redis.call("PEXPIRE", KEYS[1], ARGV[1])
+end
+
+local ttl = redis.call("PTTL", KEYS[1])
+
+return {
+    current,
+    ttl
+}
+`;
 
 export class RedisStore implements RateLimitStore {
   constructor(private readonly redisClient: RedisClientType) {}
@@ -8,17 +23,20 @@ export class RedisStore implements RateLimitStore {
     key: string,
     windowMs: number,
   ): Promise<{ count: number; ttl: number }> {
-    const count = await this.redisClient.incr(key);
+    const result = await this.redisClient.eval(FIXED_WINDOW_SCRIPT, {
+      keys: [key],
+      arguments: [windowMs.toString()],
+    });
 
-    if (count === 1) {
-      await this.redisClient.pExpire(key, windowMs);
+    if (!Array.isArray(result) || result.length !== 2) {
+      throw new Error("Invalid Redis rate limiter response");
     }
 
-    const ttl = await this.redisClient.pTTL(key);
+    const [count, ttl] = result;
 
     return {
-      count,
-      ttl,
+      count: Number(count),
+      ttl: Number(ttl),
     };
   }
 }
