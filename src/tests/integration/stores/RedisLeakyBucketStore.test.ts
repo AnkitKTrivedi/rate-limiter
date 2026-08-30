@@ -1,9 +1,11 @@
 import { createClient, RedisClientType } from "redis";
 import { RedisLeakyBucketStore } from "../../../stores/RedisLeakyBucketStore";
+import { RedisOperationExecutor } from "../../../infrastructure/RedisOperationExecutor";
 
 describe("RedisLeakyBucketStore", () => {
   let redisClient: RedisClientType;
   let store: RedisLeakyBucketStore;
+  let executor: RedisOperationExecutor;
 
   const key = "test:leaky-bucket:user-123";
 
@@ -16,8 +18,9 @@ describe("RedisLeakyBucketStore", () => {
     });
 
     await redisClient.connect();
+    executor = new RedisOperationExecutor(1000);
 
-    store = new RedisLeakyBucketStore(redisClient);
+    store = new RedisLeakyBucketStore(redisClient, executor);
   });
 
   beforeEach(async () => {

@@ -1,9 +1,11 @@
 import { createClient, RedisClientType } from "redis";
 import { RedisTokenBucketStore } from "../../../stores/RedisTokenBucketStore";
+import { RedisOperationExecutor } from "../../../infrastructure/RedisOperationExecutor";
 
 describe("RedisTokenBucketStore", () => {
   let redisClient: RedisClientType;
   let store: RedisTokenBucketStore;
+  let executor: RedisOperationExecutor;
 
   const key = "test:token-bucket:user-123";
 
@@ -17,7 +19,9 @@ describe("RedisTokenBucketStore", () => {
 
     await redisClient.connect();
 
-    store = new RedisTokenBucketStore(redisClient);
+    executor = new RedisOperationExecutor(1000);
+
+    store = new RedisTokenBucketStore(redisClient, executor);
   });
 
   beforeEach(async () => {

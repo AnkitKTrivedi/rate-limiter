@@ -1,9 +1,11 @@
 import { createClient, RedisClientType } from "redis";
 import { RedisSlidingWindowStore } from "../../../stores/RedisSlidingWindowStore";
+import { RedisOperationExecutor } from "../../../infrastructure/RedisOperationExecutor";
 
 describe("RedisSlidingWindowStore", () => {
   let redis: RedisClientType;
   let store: RedisSlidingWindowStore;
+  let executor: RedisOperationExecutor;
 
   beforeAll(async () => {
     redis = createClient({
@@ -11,8 +13,9 @@ describe("RedisSlidingWindowStore", () => {
     });
 
     await redis.connect();
+    executor = new RedisOperationExecutor(1000);
 
-    store = new RedisSlidingWindowStore(redis);
+    store = new RedisSlidingWindowStore(redis, executor);
   });
 
   afterEach(async () => {
@@ -30,40 +33,46 @@ describe("RedisSlidingWindowStore", () => {
   it("should allow requests within limit", async () => {
     const key = "test:rate-limit:user-1";
 
-    const first = await store.consume(key, 3, 60_000);
+    const now = Date.now();
+
+    const first = await store.consume(key, now, 60_000, 3);
 
     expect(first.allowed).toBe(true);
-    expect(first.remaining).toBe(2);
+    expect(first.count).toBe(1);
 
-    const second = await store.consume(key, 3, 60_000);
+    const second = await store.consume(key, now + 1, 60_000, 3);
 
     expect(second.allowed).toBe(true);
-    expect(second.remaining).toBe(1);
+    expect(second.count).toBe(2);
 
-    const third = await store.consume(key, 3, 60_000);
+    const third = await store.consume(key, now + 2, 60_000, 3);
 
     expect(third.allowed).toBe(true);
-    expect(third.remaining).toBe(0);
+    expect(third.count).toBe(3);
   });
 
   it("should reject requests after limit", async () => {
     const key = "test:rate-limit:user-2";
 
-    await store.consume(key, 2, 60_000);
+    const now = Date.now();
 
-    await store.consume(key, 2, 60_000);
+    await store.consume(key, now, 60_000, 2);
 
-    const result = await store.consume(key, 2, 60_000);
+    await store.consume(key, now + 1, 60_000, 2);
+
+    const result = await store.consume(key, now + 2, 60_000, 2);
 
     expect(result.allowed).toBe(false);
-    expect(result.remaining).toBe(0);
-    expect(result.retryAfter).toBeGreaterThanOrEqual(1);
+    expect(result.count).toBe(2);
+    expect(result.oldestTimestamp).not.toBeNull();
   });
 
   it("should keep keys isolated", async () => {
-    const userA = await store.consume("test:rate-limit:A", 1, 60_000);
+    const now = Date.now();
 
-    const userB = await store.consume("test:rate-limit:B", 1, 60_000);
+    const userA = await store.consume("test:rate-limit:A", now, 1, 60_000);
+
+    const userB = await store.consume("test:rate-limit:B", now, 1, 60_000);
 
     expect(userA.allowed).toBe(true);
     expect(userB.allowed).toBe(true);
@@ -71,9 +80,10 @@ describe("RedisSlidingWindowStore", () => {
 
   it("should enforce the limit under concurrency", async () => {
     const key = "test:rate-limit:concurrent";
+    const now = Date.now();
 
     const requests = Array.from({ length: 50 }, () =>
-      store.consume(key, 10, 60_000),
+      store.consume(key, now, 10, 60_000),
     );
 
     const results = await Promise.all(requests);
