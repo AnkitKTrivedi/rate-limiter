@@ -5,15 +5,40 @@ export const redisClient = createClient({
 });
 
 redisClient.on("error", (error) => {
-  console.error("Redis error:", error);
+  console.error({
+    event: "redis_error",
+    error,
+  });
 });
 
-export const connectRedis = async (): Promise<void> => {
+redisClient.on("connect", () => {
+  console.log({
+    event: "redis_connecting",
+  });
+});
+
+redisClient.on("ready", () => {
+  console.log({
+    event: "redis_ready",
+  });
+});
+
+redisClient.on("reconnecting", () => {
+  console.log({
+    event: "redis_reconnecting",
+  });
+});
+
+redisClient.on("end", () => {
+  console.log({
+    event: "redis_connection_closed",
+  });
+});
+
+export async function connectRedis(): Promise<void> {
   if (redisClient.isOpen) {
     return;
   }
 
   await redisClient.connect();
-
-  console.log("Redis connected");
-};
+}
