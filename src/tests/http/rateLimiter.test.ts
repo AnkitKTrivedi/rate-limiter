@@ -1,8 +1,34 @@
 import request from "supertest";
 
-import app from "../../../src/app";
+import { createApp } from "../../createApp";
+import { RateLimitService } from "../../core/RateLimitService";
 
 describe("Rate Limiter HTTP Integration", () => {
+  const policyEngine = {
+    resolve: jest.fn(),
+  };
+
+  const algorithmRegistry = {
+    create: jest.fn(),
+  };
+
+  const failureStrategy = {
+    create: jest.fn(),
+  };
+
+  const metrics = {
+    recordAllowed: jest.fn(),
+    recordRejected: jest.fn(),
+    recordError: jest.fn(),
+  };
+  const rateLimitService = new RateLimitService(
+    policyEngine as any,
+    algorithmRegistry as any,
+    failureStrategy as any,
+    metrics as any,
+  );
+  const app = createApp(rateLimitService);
+
   it("should return rate limit headers", async () => {
     const response = await request(app)
       .get("/api/users")
