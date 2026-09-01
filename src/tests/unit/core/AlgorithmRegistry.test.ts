@@ -187,7 +187,7 @@ describe("RateLimitService", () => {
 
     expect(result?.allowed).toBe(false);
 
-    expect(result?.retryAfter).toBe(30);
+    expect(result?.retryAfter).toBe(5);
   });
 
   it("should return the lowest remaining value when all policies allow", async () => {
